@@ -1,0 +1,83 @@
+===============================================
+  Phil's Super Syncer v1.0
+  Outlook to Google Calendar Sync Tool
+===============================================
+
+?? WINDOWS SMARTSCREEN WARNING - READ THIS FIRST!
+------------------------------------------------
+
+When you first run SyncOutlookToGoogle.exe, Windows may show:
+
+    "Windows protected your PC"
+    "Microsoft Defender SmartScreen prevented an unrecognized app from starting"
+
+? THIS IS NORMAL AND SAFE!
+
+WHY DOES THIS HAPPEN?
+- This is FREE, open-source software
+- Code signing certificates cost $100-400 per year
+- As a free app, we don't pay for signing
+- Windows doesn't recognize apps it hasn't seen before
+
+HOW TO RUN THE APP:
+1. Click "More info" on the warning dialog
+2. Click "Run anyway" button
+3. The app will start normally
+
+IS IT SAFE?
+? YES! The source code is fully open and reviewable at:
+   https://github.com/yourusername/SyncOutlookToGoogle
+
+? The app only:
+ - Reads your Excel file (local)
+   - Syncs to Google Calendar (using OAuth)
+   - Runs in your system tray
+
+? No malware, no tracking, no data collection
+
+STILL CONCERNED?
+- Review the source code on GitHub
+- Scan the .exe with your antivirus
+- Check file properties (should show: Virtual Eyes Lab)
+- Join our community discussions
+
+================================================
+
+QUICK START:
+1. Ensure .NET Framework 4.7.2+ is installed
+   Download: https://dotnet.microsoft.com/download/dotnet-framework/net472
+
+2. Get Google OAuth credentials:
+   - https://console.cloud.google.com/
+   - Create OAuth 2.0 Desktop App credentials
+   - Download and rename to "client_secret.json"
+ - Place in the SAME FOLDER as SyncOutlookToGoogle.exe
+     (NOT in the source code folder!)
+
+   Example locations:
+   ? C:\Program Files\PhilsSuperSyncer\client_secret.json
+   ? C:\Users\YourName\Desktop\PhilsSuperSyncer\client_secret.json
+ ? DO NOT place in the source code directory!
+
+3. Set up Power Automate with Sample Excel.xlsx
+
+4. Run SyncOutlookToGoogle.exe
+   - Select your Excel file
+   - Login to Google
+   - Configure sync interval
+
+5. App runs in system tray!
+
+================================================
+
+SUPPORT & DOCUMENTATION:
+- Full guide: https://github.com/yourusername/SyncOutlookToGoogle
+- Report issues: https://github.com/yourusername/SyncOutlookToGoogle/issues
+- Check logs: Logs\ folder (created after first run)
+
+================================================
+
+Copyright © 2025 Dr Phil Turnbull
+Licensed under MIT License - free to use!
+
+Made with ?? for anyone tired of manual calendar syncing!

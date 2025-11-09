@@ -1,0 +1,135 @@
+##########################################################
+# Phil's Super Syncer - .gitignore
+##########################################################
+
+##########################################################
+# CRITICAL: NEVER COMMIT THESE FILES
+# These contain sensitive credentials and user data
+##########################################################
+
+# Google OAuth Client Secret (contains API credentials)
+client_secret.json
+
+# User Settings (contains refresh token, file paths, email)
+settings.json
+
+# Event ID Mapping Database (local sync state)
+id_map.json
+
+# Google OAuth Token Storage
+token.json/
+
+# User's Excel sync log files
+*.xlsx
+*.xls
+
+# Application Log Files
+Logs/
+*.log
+
+##########################################################
+# Visual Studio / .NET Framework
+##########################################################
+
+# User-specific files
+*.rsuser
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# User-specific folders
+.vs/
+.vscode/
+
+# Build results
+[Dd]ebug/
+[Dd]ebugPublic/
+[Rr]elease/
+[Rr]eleases/
+x64/
+x86/
+[Ww][Ii][Nn]32/
+[Aa][Rr][Mm]/
+[Aa][Rr][Mm]64/
+bld/
+[Bb]in/
+[Oo]bj/
+[Ll]og/
+[Ll]ogs/
+
+# Build-related files
+*.tlog
+*.pdb
+*.ilk
+*.cache
+*.exe
+*.dll
+!packages/**/*.dll
+
+# .NET Core
+project.lock.json
+project.fragment.lock.json
+artifacts/
+
+# NuGet Packages
+*.nupkg
+*.snupkg
+**/packages/*
+!**/packages/build/
+# NuGet v3's project.json files
+*.nuget.props
+*.nuget.targets
+
+# Visual Studio cache files
+*.suo
+*.cachefile
+*.VC.db
+*.VC.VC.opendb
+
+# Visual Studio profiler
+*.psess
+*.vsp
+*.vspx
+*.sap
+
+# ReSharper
+_ReSharper*/
+*.[Rr]e[Ss]harper
+*.DotSettings.user
+
+# JetBrains Rider
+.idea/
+*.sln.iml
+
+# Windows image file caches
+Thumbs.db
+ehthumbs.db
+
+# Folder config file
+Desktop.ini
+
+# Recycle Bin
+$RECYCLE.BIN/
+
+# Mac
+.DS_Store
+
+##########################################################
+# Application Logs & Temporary Files
+##########################################################
+
+*.log
+*.tmp
+*.temp
+*~
+
+##########################################################
+# Documentation / Notes 
+##########################################################
+
+notes.txt
+TODO.txt
+
+# One-time utility scripts (no longer needed)
+ReplaceDebugWithLogger.ps1

@@ -1,0 +1,31 @@
+# Auto-normalize line endings for cross-platform compatibility
+* text=auto
+
+# Source code
+*.cs text diff=csharp
+*.csproj text
+*.sln text
+*.config text
+*.resx text
+
+# Documentation
+*.md text
+*.txt text
+README text
+
+# Data files
+*.json text
+*.xml text
+
+# Binary files
+*.ico binary
+*.xlsx binary
+*.xls binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.bmp binary
+*.dll binary
+*.exe binary
+*.pdb binary
