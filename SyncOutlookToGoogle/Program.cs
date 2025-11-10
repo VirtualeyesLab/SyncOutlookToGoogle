@@ -170,43 +170,67 @@ namespace CalendarSyncEngine
         private void UpdateUIFromSettings()
         {
             // --- Excel Panel ---
-            lblExcelFile.Text = string.IsNullOrEmpty(_settings.ExcelFilePath)
-                   ? "No file selected."
-                     : Path.GetFileName(_settings.ExcelFilePath);
-            ValidateExcelFile(); // This updates the "tick"
+      lblExcelFile.Text = string.IsNullOrEmpty(_settings.ExcelFilePath)
+              ? "No file selected."
+       : Path.GetFileName(_settings.ExcelFilePath);
+   ValidateExcelFile(); // This updates the "tick"
 
-            // --- Google Panel ---
+    // --- Google Panel ---
             if (!string.IsNullOrEmpty(_settings.GoogleRefreshToken))
-            {
-                // Logged-in state
-                lblGoogleAccount.Text = "Status: Logged In";
-                lblGoogleCalendar.Text = $"Account: {_settings.GoogleAccountEmail ?? "Unknown"}";
-                lblCalendarName.Text = $"Calendar: {_settings.GoogleCalendarName ?? "Not selected"}";
-                lblGoogleAccount.Visible = true;
-                lblGoogleCalendar.Visible = true;
-                lblCalendarName.Visible = true;
-                btnLoginGoogle.Visible = false;
+          {
+           // Logged-in state
+      lblGoogleAccount.Text = "Status: Logged In";
+         
+     // Show email if available, otherwise show a helpful message
+     if (!string.IsNullOrEmpty(_settings.GoogleAccountEmail))
+   {
+        lblGoogleCalendar.Text = $"Account: {_settings.GoogleAccountEmail}";
+                }
+           else
+       {
+   lblGoogleCalendar.Text = "Account: (email not saved - syncing still works)";
+                }
+   
+    // Show calendar name if available
+if (!string.IsNullOrEmpty(_settings.GoogleCalendarName))
+    {
+           lblCalendarName.Text = $"Calendar: {_settings.GoogleCalendarName}";
+    }
+           else if (!string.IsNullOrEmpty(_settings.GoogleCalendarId))
+           {
+                // Show ID if name is missing but ID exists
+       lblCalendarName.Text = $"Calendar: {_settings.GoogleCalendarId}";
+        }
+      else
+      {
+    lblCalendarName.Text = "Calendar: (connected - syncing works)";
+        }
+  
+            lblGoogleAccount.Visible = true;
+ lblGoogleCalendar.Visible = true;
+    lblCalendarName.Visible = true;
+    btnLoginGoogle.Visible = false;
                 btnLogoutGoogle.Visible = true;
-                cmbGoogleCalendar.Visible = false;
-            }
-            else
+       cmbGoogleCalendar.Visible = false;
+    }
+   else
             {
                 // Logged-out state
-                lblGoogleAccount.Text = "Status: Not logged in";
-                lblGoogleCalendar.Text = "Account: None";
-                lblCalendarName.Text = "Calendar: None";
-                lblGoogleAccount.Visible = true;
-                lblGoogleCalendar.Visible = true;
-                lblCalendarName.Visible = true;
-                btnLoginGoogle.Visible = true;
-                btnLogoutGoogle.Visible = false;
-                cmbGoogleCalendar.Visible = false; // Hide until login
-            }
+         lblGoogleAccount.Text = "Status: Not logged in";
+     lblGoogleCalendar.Text = "Account: None";
+         lblCalendarName.Text = "Calendar: None";
+     lblGoogleAccount.Visible = true;
+  lblGoogleCalendar.Visible = true;
+         lblCalendarName.Visible = true;
+         btnLoginGoogle.Visible = true;
+    btnLogoutGoogle.Visible = false;
+          cmbGoogleCalendar.Visible = false; // Hide until login
+      }
 
-            // --- Sync Panel ---
-            numSyncInterval.Value = Math.Max(1, _settings.SyncIntervalMinutes); // Ensure at least 1
+        // --- Sync Panel ---
+  numSyncInterval.Value = Math.Max(1, _settings.SyncIntervalMinutes); // Ensure at least 1
             chkEnableLogging.Checked = _settings.EnableLogging; // Reflect current logging state
-            UpdateLastSyncLabel(); // Update last sync display
+     UpdateLastSyncLabel(); // Update last sync display
         }
 
         // ### Update last sync label with relative time ###
@@ -240,51 +264,51 @@ namespace CalendarSyncEngine
         private void ValidateExcelFile()
         {
             if (string.IsNullOrEmpty(_settings.ExcelFilePath))
-            {
-                lblExcelStatus.Text = "?";
-                lblExcelStatus.ForeColor = Color.Red;
-                return;
-            }
+   {
+       lblExcelStatus.Text = "ERROR";
+    lblExcelStatus.ForeColor = Color.Red;
+    return;
+    }
 
             if (!File.Exists(_settings.ExcelFilePath))
             {
-                lblExcelStatus.Text = "?";
-                lblExcelStatus.ForeColor = Color.Red;
-                return;
+   lblExcelStatus.Text = "ERROR";
+      lblExcelStatus.ForeColor = Color.Red;
+            return;
             }
 
             try
             {
                 // Test read. We just need to check headers, not read all data.
                 using (var workbook = new XLWorkbook(_settings.ExcelFilePath))
-                {
-                    var worksheet = workbook.Worksheets.FirstOrDefault();
-                    if (worksheet == null) throw new Exception("No worksheet found.");
-                    var table = worksheet.Table(ExcelTableName);
-                    if (table == null) throw new Exception($"Table '{ExcelTableName}' not found.");
+        {
+  var worksheet = workbook.Worksheets.FirstOrDefault();
+  if (worksheet == null) throw new Exception("No worksheet found.");
+          var table = worksheet.Table(ExcelTableName);
+if (table == null) throw new Exception($"Table '{ExcelTableName}' not found.");
 
-                    var headers = table.HeadersRow().Cells().Select(c => c.GetValue<string>().Trim()).ToList();
-                    string[] requiredHeaders = { "IsProcessed", "Outlook Event ID", "ActionType" };
-                    foreach (var reqHeader in requiredHeaders)
-                    {
-                        if (!headers.Any(h => h.Equals(reqHeader, StringComparison.OrdinalIgnoreCase)))
-                        {
-                            throw new Exception($"Missing header: {reqHeader}");
-                        }
-                    }
+ var headers = table.HeadersRow().Cells().Select(c => c.GetValue<string>().Trim()).ToList();
+         string[] requiredHeaders = { "IsProcessed", "Outlook Event ID", "ActionType" };
+          foreach (var reqHeader in requiredHeaders)
+        {
+ if (!headers.Any(h => h.Equals(reqHeader, StringComparison.OrdinalIgnoreCase)))
+              {
+ throw new Exception($"Missing header: {reqHeader}");
+  }
+        }
                 }
 
-                // If all checks pass:
-                lblExcelStatus.Text = "?";
-                lblExcelStatus.ForeColor = Color.Green;
-            }
+       // If all checks pass:
+   lblExcelStatus.Text = "OK";
+      lblExcelStatus.ForeColor = Color.Green;
+   }
             catch (Exception ex)
             {
-                // File is locked or invalid
-                lblExcelStatus.Text = "?";
-                lblExcelStatus.ForeColor = Color.Red;
-                Logger.Warning($"Excel validation failed: {ex.Message}");
-            }
+  // File is locked or invalid
+        lblExcelStatus.Text = "ERROR";
+             lblExcelStatus.ForeColor = Color.Red;
+          Logger.Warning($"Excel validation failed: {ex.Message}");
+      }
         }
 
         private void StartSyncService()
@@ -903,77 +927,100 @@ Logger.SetEnabled(false);
 
                 var (credential, calendars, email) = await GoogleAuth.AuthorizeAsync();
 
-                _settings.GoogleAccountEmail = email;
-                if (credential.Token.RefreshToken != null)
-                {
-                    _settings.GoogleRefreshToken = credential.Token.RefreshToken;
-                }
-                else
-                {
-                    string tokenFolder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "token.json");
-                    string tokenFile = Path.Combine(tokenFolder, "Google.Apis.Auth.OAuth2.Responses.TokenResponse-user");
-                    if (File.Exists(tokenFile))
-                    {
-                        var tokenJson = File.ReadAllText(tokenFile);
-                        var token = JsonConvert.DeserializeObject<Google.Apis.Auth.OAuth2.Responses.TokenResponse>(tokenJson);
-                        _settings.GoogleRefreshToken = token.RefreshToken;
-                    }
+                // Save the email (important!)
+                  _settings.GoogleAccountEmail = email;
+                 Logger.Info($"Google login successful. Email: {email ?? "NULL"}");
+
+              if (credential.Token.RefreshToken != null)
+    {
+       _settings.GoogleRefreshToken = credential.Token.RefreshToken;
+          Logger.Info("Refresh token obtained from credential.");
+     }
+    else
+          {
+          Logger.Warning("Refresh token was null in credential.Token. Attempting to read from token file...");
+   string tokenFolder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "token.json");
+           string tokenFile = Path.Combine(tokenFolder, "Google.Apis.Auth.OAuth2.Responses.TokenResponse-user");
+  if (File.Exists(tokenFile))
+{
+                 var tokenJson = File.ReadAllText(tokenFile);
+                var token = JsonConvert.DeserializeObject<Google.Apis.Auth.OAuth2.Responses.TokenResponse>(tokenJson);
+_settings.GoogleRefreshToken = token.RefreshToken;
+     Logger.Info("Refresh token obtained from token file.");
+}
+        else
+     {
+           Logger.Error("Token file not found. Refresh token could not be obtained.");
+}
+           }
+
+            cmbGoogleCalendar.Items.Clear();
+           foreach (var calendar in calendars.Items)
+         {
+              cmbGoogleCalendar.Items.Add(new CalendarItem { Id = calendar.Id, Summary = calendar.Summary });
+    }
+             cmbGoogleCalendar.DisplayMember = "Summary";
+      cmbGoogleCalendar.ValueMember = "Id";
+
+     // Pre-select primary calendar
+     var primary = calendars.Items.FirstOrDefault(c => c.Primary == true);
+    if (primary != null)
+ {
+         cmbGoogleCalendar.SelectedItem = cmbGoogleCalendar.Items
+           .Cast<CalendarItem>()
+        .FirstOrDefault(ci => ci.Id == primary.Id);
                 }
 
-                cmbGoogleCalendar.Items.Clear();
-                foreach (var calendar in calendars.Items)
-                {
-                    cmbGoogleCalendar.Items.Add(new CalendarItem { Id = calendar.Id, Summary = calendar.Summary });
-                }
-                cmbGoogleCalendar.DisplayMember = "Summary";
-                cmbGoogleCalendar.ValueMember = "Id";
+  // Show the dropdown and ask user to select
+           cmbGoogleCalendar.Visible = true;
+   lblGoogleAccount.Text = "Status: Logged In";
+    lblGoogleCalendar.Text = $"Account: {email ?? "Unknown"}";
+          lblCalendarName.Text = "Please select a calendar below:";
 
-                // Pre-select primary calendar
-                var primary = calendars.Items.FirstOrDefault(c => c.Primary == true);
-                if (primary != null)
-                {
-                    cmbGoogleCalendar.SelectedItem = cmbGoogleCalendar.Items
-                    .Cast<CalendarItem>()
-                    .FirstOrDefault(ci => ci.Id == primary.Id);
-                }
+      // Hide login button, show logout button
+      btnLoginGoogle.Visible = false;
+         btnLogoutGoogle.Visible = true;
 
-                // Show the dropdown and ask user to select
-                cmbGoogleCalendar.Visible = true;
-                lblGoogleAccount.Text = "Status: Logged In";
-                lblGoogleCalendar.Text = $"Account: {email}";
-                lblCalendarName.Text = "Please select a calendar below:";
-
-                // Hide login button, show logout button
-                btnLoginGoogle.Visible = false;
-                btnLogoutGoogle.Visible = true;
-            }
+           // IMPORTANT: Save settings immediately after login
+         SaveSettings();
+     Logger.Info($"Settings saved after login. Email saved: {_settings.GoogleAccountEmail}");
+     }
             catch (Exception ex)
-            {
-                MessageBox.Show($"Google login failed: {ex.Message}", "Login Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                UpdateUIFromSettings();
-            }
+ {
+      Logger.Error($"Google login failed: {ex.Message}", ex);
+      MessageBox.Show($"Google login failed: {ex.Message}", "Login Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+     UpdateUIFromSettings();
+       }
             finally
-            {
-                btnLoginGoogle.Enabled = true;
-            }
-        }
+          {
+      btnLoginGoogle.Enabled = true;
+    }
+}
 
         private void OnGoogleCalendarSelected(object sender, EventArgs e)
-        {
-            var selectedCalendar = cmbGoogleCalendar.SelectedItem as CalendarItem;
-            if (selectedCalendar != null)
-            {
-                _settings.GoogleCalendarId = selectedCalendar.Id;
-                _settings.GoogleCalendarName = selectedCalendar.Summary;
+   {
+   var selectedCalendar = cmbGoogleCalendar.SelectedItem as CalendarItem;
+ if (selectedCalendar != null)
+    {
+        _settings.GoogleCalendarId = selectedCalendar.Id;
+     _settings.GoogleCalendarName = selectedCalendar.Summary;
+   
+     Logger.Info($"Calendar selected: {selectedCalendar.Summary} (ID: {selectedCalendar.Id})");
 
-                SaveSettings();
-                UpdateUIFromSettings();
+  SaveSettings();
+    Logger.Info($"Settings saved after calendar selection. Email: {_settings.GoogleAccountEmail}, Calendar: {_settings.GoogleCalendarName}");
 
-                if (IsSettingsValid() && _syncTimer == null)
-                {
-                    StartSyncService();
-                }
-            }
+       // Ensure the calendar dropdown is hidden after selection
+    cmbGoogleCalendar.Visible = false;
+
+      // Update UI to reflect the changes
+      UpdateUIFromSettings();
+
+    if (IsSettingsValid() && _syncTimer == null)
+     {
+    StartSyncService();
+ }
+   }
         }
 
         private void OnGoogleLogout(object sender, EventArgs e)
@@ -1010,23 +1057,35 @@ Logger.SetEnabled(false);
         {
             _settings.SyncIntervalMinutes = (int)numSyncInterval.Value;
 
-      // Update logging preference
-       bool loggingChanged = _settings.EnableLogging != chkEnableLogging.Checked;
- _settings.EnableLogging = chkEnableLogging.Checked;
-  
-      SaveSettings();
+   // Update logging preference
+            bool loggingChanged = _settings.EnableLogging != chkEnableLogging.Checked;
+            _settings.EnableLogging = chkEnableLogging.Checked;
 
-  if (loggingChanged)
-   {
-        Logger.SetEnabled(_settings.EnableLogging);
-  }
+            SaveSettings();
+
+            if (loggingChanged)
+          {
+   Logger.SetEnabled(_settings.EnableLogging);
+            }
 
             if (_syncTimer != null)
     {
-    InitializeSyncTimer();
-     }
+          InitializeSyncTimer();
+    }
 
-    this.Hide();
+          // Show confirmation and minimize to tray
+    MessageBox.Show("Settings saved successfully!\n\nThe app will continue running in the system tray.", 
+                "Settings Saved", 
+    MessageBoxButtons.OK, 
+      MessageBoxIcon.Information);
+
+  this.Hide();
+ 
+   // Show tray notification
+   if (trayIcon != null)
+   {
+     trayIcon.ShowBalloonTip(2000, "Phil's Super Syncer", "Settings saved. App is running in the system tray.", ToolTipIcon.Info);
+    }
         }
 
         private void OnResetApp(object sender, EventArgs e)
@@ -1095,13 +1154,13 @@ Logger.SetEnabled(false);
             // --- Excel Group ---
             this.grpExcel = new GroupBox { Text = "1. Outlook / Excel File", Location = new Point(12, 12), Size = new Size(410, 90) };
             this.lblExcelFile = new Label { Text = "No file selected.", Location = new Point(15, 25), AutoSize = true, MaximumSize = new Size(280, 40) };
-            this.lblExcelStatus = new Label { Text = "?", Location = new Point(300, 25), Font = new Font(this.Font, FontStyle.Bold), ForeColor = Color.Red, AutoSize = true };
+            this.lblExcelStatus = new Label { Text = "ERROR", Location = new Point(360, 25), Font = new Font(this.Font, FontStyle.Bold), ForeColor = Color.Red, AutoSize = true };
             this.btnChangeExcel = new Button { Text = "Change...", Location = new Point(320, 50), Size = new Size(75, 25) };
             this.btnChangeExcel.Click += OnBrowseExcel;
 
-            this.grpExcel.Controls.Add(this.lblExcelFile);
-            this.grpExcel.Controls.Add(this.lblExcelStatus);
-            this.grpExcel.Controls.Add(this.btnChangeExcel);
+         this.grpExcel.Controls.Add(this.lblExcelFile);
+     this.grpExcel.Controls.Add(this.lblExcelStatus);
+      this.grpExcel.Controls.Add(this.btnChangeExcel);
             this.Controls.Add(this.grpExcel);
 
             // --- Google Group ---
@@ -1152,15 +1211,15 @@ Logger.SetEnabled(false);
        this.Controls.Add(this.grpSync);
 
             // --- Main Buttons ---
-            this.btnSave = new Button { Text = "Save", Location = new Point(12, 410), Size = new Size(133, 30) }; // Moved down by 30px
+            this.btnSave = new Button { Text = "Save", Location = new Point(12, 410), Size = new Size(133, 30) }; // Moved down from 377 to 410
   this.btnSave.Click += OnSave;
   this.Controls.Add(this.btnSave);
 
-         this.btnResetApp = new Button { Text = "Reset All", Location = new Point(151, 410), Size = new Size(133, 30) }; // Moved down by 30px
+         this.btnResetApp = new Button { Text = "Reset All", Location = new Point(151, 410), Size = new Size(133, 30) }; // Moved down from 377 to 410
    this.btnResetApp.Click += OnResetApp;
  this.Controls.Add(this.btnResetApp);
 
-    Button btnExitApp = new Button { Text = "Exit App", Location = new Point(290, 410), Size = new Size(132, 30) }; // Moved down by 30px
+    Button btnExitApp = new Button { Text = "Exit App", Location = new Point(290, 410), Size = new Size(132, 30) }; // Moved down from 377 to 410
      btnExitApp.Click += OnExit;
   this.Controls.Add(btnExitApp);
             // Hide form on close

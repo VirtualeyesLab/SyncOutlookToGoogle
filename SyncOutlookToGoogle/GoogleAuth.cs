@@ -18,7 +18,11 @@ namespace CalendarSyncEngine
     public static class GoogleAuth
     {
         // This scope allows us to read, write, and delete calendar events.
-        static string[] Scopes = { CalendarService.Scope.Calendar };
+        // ALSO request email scope to get user's email address
+        static string[] Scopes = { 
+          CalendarService.Scope.Calendar,
+      "https://www.googleapis.com/auth/userinfo.email"  // NEW: Required to get email
+      };
         static string ApplicationName = "Outlook to Google Calendar Sync";
 
         public static async Task<(UserCredential credential, CalendarList calendars, string email)> AuthorizeAsync()
@@ -64,10 +68,12 @@ namespace CalendarSyncEngine
                 });
                 var userInfo = await oauthService.Userinfo.Get().ExecuteAsync();
                 email = userInfo.Email;
+                Logger.Info($"Retrieved user email from Google: {email}");
             }
             catch (Exception ex)
             {
                 Logger.Warning($"Could not get user email: {ex.Message}");
+                Logger.Warning("Email scope might be missing. Email will default to 'Unknown User'.");
             }
 
             return (credential, calendarList, email);

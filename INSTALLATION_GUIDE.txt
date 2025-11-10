@@ -51,13 +51,14 @@ QUICK START:
    - https://console.cloud.google.com/
    - Create OAuth 2.0 Desktop App credentials
    - Download and rename to "client_secret.json"
- - Place in the SAME FOLDER as SyncOutlookToGoogle.exe
-     (NOT in the source code folder!)
-
-   Example locations:
-   ? C:\Program Files\PhilsSuperSyncer\client_secret.json
-   ? C:\Users\YourName\Desktop\PhilsSuperSyncer\client_secret.json
- ? DO NOT place in the source code directory!
+   - **CRITICAL**: Place "client_secret.json" in the SAME FOLDER as SyncOutlookToGoogle.exe
+   
+   Example:
+   ? C:\Program Files\PhilsSuperSyncer\SyncOutlookToGoogle.exe
+   ? C:\Program Files\PhilsSuperSyncer\client_secret.json  ? Same folder!
+   
+   ? DO NOT place in a subfolder
+   ? DO NOT place in the source code directory
 
 3. Set up Power Automate with Sample Excel.xlsx
 
