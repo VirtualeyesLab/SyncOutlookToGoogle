@@ -19,6 +19,8 @@ try:
     WATCHDOG_AVAILABLE = True
 except ImportError:
     WATCHDOG_AVAILABLE = False
+    Observer = None
+    FileSystemEventHandler = None
     logging.warning("watchdog not installed. File monitoring will use polling fallback.")
 
 from sync import get_google_service, load_outlook_snapshot, perform_sync
@@ -42,27 +44,37 @@ def setup_logging(level: str = 'INFO'):
 logger = logging.getLogger(__name__)
 
 
-class OutlookFileHandler(FileSystemEventHandler):
-    """Watchdog file system event handler for OutlookSnapshot.json changes."""
-    
-    def __init__(self, callback: Callable, debounce_seconds: float = 2.0):
-        super().__init__()
-        self.callback = callback
-        self.debounce_seconds = debounce_seconds
-        self.last_event_time = 0
-    
-    def on_modified(self, event):
-        """Called when a file is modified."""
-        if event.is_directory:
-            return
+# Define OutlookFileHandler only if watchdog is available
+if WATCHDOG_AVAILABLE:
+    class OutlookFileHandler(FileSystemEventHandler):
+        """Watchdog file system event handler for OutlookSnapshot.json changes."""
         
-        # Debounce: ignore events closer than debounce_seconds apart
-        current_time = time.time()
-        if current_time - self.last_event_time < self.debounce_seconds:
-            return
+        def __init__(self, callback: Callable, debounce_seconds: float = 2.0):
+            super().__init__()
+            self.callback = callback
+            self.debounce_seconds = debounce_seconds
+            self.last_event_time = 0
         
-        self.last_event_time = current_time
-        self.callback()
+        def on_modified(self, event):
+            """Called when a file is modified."""
+            if event.is_directory:
+                return
+            
+            # Debounce: ignore events closer than debounce_seconds apart
+            current_time = time.time()
+            if current_time - self.last_event_time < self.debounce_seconds:
+                return
+            
+            self.last_event_time = current_time
+            self.callback()
+else:
+    class OutlookFileHandler:
+        """Placeholder when watchdog is not available."""
+        def __init__(self, callback: Callable, debounce_seconds: float = 2.0):
+            pass
+        
+        def on_modified(self, event):
+            pass
 
 
 class SyncAgent:
