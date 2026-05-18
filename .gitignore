@@ -1,0 +1,25 @@
+# Secrets
+credentials.json
+token.json
+config.json
+
+# Logs and intermediate files
+sync.log
+OutlookSnapshot.json
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.env
+
+# IDE
+.vs/
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
