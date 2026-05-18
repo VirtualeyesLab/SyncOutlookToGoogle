@@ -49,35 +49,199 @@ You need to authorise the script to edit your personal Google Calendar. This par
 ## 3: Local Environment Setup
 
 1. **Clone the repository.**
-2. **Install requirements:**
+2. **Install all requirements:**
    ```bash
-   pip install google-api-python-client google-auth-httplib2 google-auth-oauthlib
+   pip install -r requirements.txt
    ```
+   This includes:
+   - Google Calendar API client
+   - watchdog (for file monitoring)
+   - PyQt5 (for GUI)
 
 ---
 
 ## 4: Running the Sync
 
-Run the script from your terminal:
+### Option A: GUI Settings & Monitoring (Recommended)
+
+The easiest way to manage the sync is through the graphical interface:
+
+1. **Launch the GUI:**
+   ```bash
+   python gui_app.py
+   ```
+
+2. **Configure settings:**
+   - Navigate to the "Settings" tab
+   - Click "Browse..." to select your `OutlookSnapshot.json` file
+   - Adjust timezone, sync frequency, and logging level as needed
+   - Click "Save Settings"
+
+3. **Authenticate with Google:**
+   - Go to the "Google Authentication" tab
+   - Click "Authenticate"
+   - A browser window will open; authorize the app to access your Google Calendar
+   - Return to the app to confirm successful authentication
+
+4. **View sync history:**
+   - The "Sync History" tab shows the last sync results
+   - View detailed logs to troubleshoot any issues
+
+### Option B: Command-Line Monitoring Agent
+
+Run the monitoring agent that automatically triggers syncs when the snapshot file changes:
+
+```bash
+python agent.py --monitor
+```
+
+The agent will:
+- Monitor your `OutlookSnapshot.json` file for changes (using watchdog)
+- Automatically trigger a sync when changes are detected
+- Fall back to polling if watchdog is unavailable
+- Log all activity to `sync.log`
+
+### Option C: Manual Single Sync
+
+Run a single sync immediately:
+
 ```bash
 python sync.py
 ```
 
-### First-Run Setup:
-1. The script will prompt you for the local path to your `OutlookSnapshot.json` file (e.g., `C:\Users\Name\OneDrive\CalendarSync\OutlookSnapshot.json`). It saves this to `config.json`. If this ever changes, just delete this config.json file and it will ask again on next run. 
-2. A browser window will open asking you to authenticate with your Google account. This generates a local `token.json` file. Do not ever share this file. If your Google authentication changes, you can simply delete this file and it will ask you to reauthenticate on next run. 
-
-### Standard Execution:
-Subsequent runs will run with more automation, saving detailed logs to `sync.log`. You can view or delete this log anytime. 
-
-### Verbose Mode:
-If you need to troubleshoot or see exactly which events are being updated/deleted, run the script with the verbose flag:
+Or via the agent:
 ```bash
-python sync.py -v
+python agent.py --sync-now
 ```
-*(or `python sync.py --verbose`)*
 
 ---
 
-##  Automation
-To keep your calendars synced automatically, point **Windows Task Scheduler** to your python executable and pass this script as an argument to run every 15-30 minutes. 
+## 5: Automatic Startup
+
+To run the agent automatically when Windows starts:
+
+### Using the Setup Script (Recommended)
+
+Run as Administrator:
+```bash
+python setup_scheduler.py --install
+```
+
+This creates a Windows Task Scheduler task that runs the agent at user logon.
+
+**To uninstall:**
+```bash
+python setup_scheduler.py --uninstall
+```
+
+**To check status:**
+```bash
+python setup_scheduler.py --status
+```
+
+---
+
+## Configuration
+
+Settings are stored in `config.json`:
+
+```json
+{
+    "OUTLOOK_JSON_PATH": "C:\\Users\\Name\\OneDrive\\OutlookSnapshot.json",
+    "TIMEZONE": "Pacific/Auckland",
+    "SYNC_FREQUENCY_MINUTES": 15,
+    "MONITORING_ENABLED": true,
+    "LOGGING_LEVEL": "INFO",
+    "LAST_SYNC_TIME": "2024-01-15T14:30:45.123456",
+    "LAST_SYNC_STATUS": "Success",
+    "LAST_SYNC_CREATED": 5,
+    "LAST_SYNC_UPDATED": 3,
+    "LAST_SYNC_DELETED": 1
+}
+```
+
+You can edit this file directly, but the GUI is recommended.
+
+---
+
+## File Monitoring
+
+The agent uses two methods to detect changes to `OutlookSnapshot.json`:
+
+1. **Watchdog (Preferred):** Real-time file system notifications (efficient and responsive)
+2. **Polling (Fallback):** Checks file modification time periodically (if watchdog unavailable)
+
+The agent automatically selects the best available method and switches between them if needed.
+
+---
+
+## Troubleshooting
+
+### "Snapshot file not found"
+- Verify the path in config.json is correct
+- Ensure your Power Automate flow is running and updating `OutlookSnapshot.json`
+- Check that the file exists at the configured location
+
+### Authentication errors
+- Delete `token.json` and re-authenticate through the GUI
+- Verify your Google Cloud credentials.json is in the repository root
+
+### No events being synced
+- Check `sync.log` for detailed error messages
+- Verify your Outlook events exist in the snapshot file
+- Ensure the configured timezone matches your local timezone
+
+### GUI won't start
+- Verify PyQt5 is installed: `pip install PyQt5>=5.15`
+- Try running from command line to see detailed error messages
+
+---
+
+## Files
+
+| File | Purpose |
+|------|---------|
+| `sync.py` | Core sync logic (can be run standalone) |
+| `agent.py` | Background agent with file monitoring |
+| `gui_app.py` | PyQt5 graphical interface |
+| `agent_config.py` | Configuration manager and schema |
+| `setup_scheduler.py` | Windows Task Scheduler integration |
+| `config.json` | Settings and sync history |
+| `token.json` | Google authentication token (gitignored) |
+| `credentials.json` | Google OAuth credentials (gitignored) |
+| `sync.log` | Detailed execution logs |
+
+---
+
+## Architecture
+
+The sync system consists of three components:
+
+- **Core Sync Engine (`sync.py`):** Handles Outlook→Google synchronization logic
+- **Monitoring Agent (`agent.py`):** Watches for file changes and triggers syncs
+- **GUI Manager (`gui_app.py`):** Provides user-friendly configuration and monitoring
+- **Config Manager (`agent_config.py`):** Persists and manages all settings
+
+All components share the same configuration file (`config.json`) for centralized settings management.
+
+---
+
+##  Development
+
+The refactored architecture allows easy extension:
+
+- Extracted sync functions can be imported and used programmatically
+- ConfigManager provides centralized settings
+- SyncAgent can be used as a library in other Python apps
+- GUI is independent and can be run separately
+
+Example programmatic usage:
+```python
+from sync import perform_sync, get_google_service, load_outlook_snapshot
+from agent_config import ConfigManager
+
+config = ConfigManager()
+service = get_google_service(config.get_timezone())
+events = load_outlook_snapshot(config.get_outlook_json_path())
+stats = perform_sync(service, events, config.get_timezone())
+```
