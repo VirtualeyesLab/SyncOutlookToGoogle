@@ -39,6 +39,7 @@ def setup_logging(level: str = 'INFO'):
             logging.StreamHandler(sys.stdout)
         ]
     )
+    logging.getLogger("googleapiclient.discovery_cache").setLevel(logging.WARNING)
 
 
 logger = logging.getLogger(__name__)
@@ -132,10 +133,11 @@ class SyncAgent:
             # Load snapshot and get service
             outlook_events = load_outlook_snapshot(snapshot_path)
             timezone = self.config_manager.get_timezone()
+            calendar_id = self.config_manager.get_google_calendar_id()
             service = get_google_service(timezone)
             
             # Perform sync
-            stats = perform_sync(service, outlook_events, timezone)
+            stats = perform_sync(service, outlook_events, timezone, calendar_id)
             
             # Update sync results in config
             self.config_manager.update_sync_result('Success', stats['created'], stats['updated'], stats['deleted'])

@@ -20,6 +20,8 @@ class ConfigManager:
     DEFAULT_CONFIG = {
         'OUTLOOK_JSON_PATH': '',
         'TIMEZONE': 'Pacific/Auckland',
+        'GOOGLE_CALENDAR_ID': 'primary',
+        'GOOGLE_CALENDAR_NAME': 'Primary Calendar',
         'SYNC_FREQUENCY_MINUTES': 15,
         'MONITORING_ENABLED': True,
         'LOGGING_LEVEL': 'INFO',
@@ -89,7 +91,7 @@ class ConfigManager:
     def update_sync_result(self, status: str, created: int = 0, updated: int = 0, deleted: int = 0):
         """Update sync result statistics."""
         self.update({
-            'LAST_SYNC_TIME': datetime.now().isoformat(),
+            'LAST_SYNC_TIME': datetime.now().isoformat(timespec='seconds'),
             'LAST_SYNC_STATUS': status,
             'LAST_SYNC_CREATED': created,
             'LAST_SYNC_UPDATED': updated,
@@ -115,6 +117,21 @@ class ConfigManager:
     def get_sync_frequency_minutes(self) -> int:
         """Get sync frequency in minutes."""
         return self.get('SYNC_FREQUENCY_MINUTES', 15)
+
+    def get_google_calendar_id(self) -> str:
+        """Get target Google Calendar ID."""
+        return self.get('GOOGLE_CALENDAR_ID', 'primary')
+
+    def set_google_calendar(self, calendar_id: str, calendar_name: str = ''):
+        """Set target Google Calendar ID and display name."""
+        updates = {'GOOGLE_CALENDAR_ID': calendar_id or 'primary'}
+        if calendar_name:
+            updates['GOOGLE_CALENDAR_NAME'] = calendar_name
+        self.update(updates)
+
+    def get_google_calendar_name(self) -> str:
+        """Get target Google Calendar display name."""
+        return self.get('GOOGLE_CALENDAR_NAME', 'Primary Calendar')
     
     def set_sync_frequency_minutes(self, minutes: int):
         """Set sync frequency in minutes."""

@@ -6,21 +6,20 @@ Provides UI for managing settings, authentication, and viewing sync history.
 import sys
 import os
 import json
-from pathlib import Path
 from datetime import datetime
 from typing import Optional
 
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QTabWidget, QLabel, QLineEdit, QPushButton, QSpinBox, QComboBox,
-    QFileDialog, QTextEdit, QStatusBar, QMessageBox, QGridLayout,
-    QGroupBox, QFormLayout
+    QFileDialog, QTextEdit, QStatusBar, QMessageBox,
+    QGroupBox, QFormLayout, QSystemTrayIcon, QMenu, QAction, QStyle
 )
 from PyQt5.QtCore import Qt, QTimer, pyqtSignal, QObject
-from PyQt5.QtGui import QFont, QColor
+from PyQt5.QtGui import QFont
 
 from agent_config import ConfigManager
-from sync import get_google_service
+from sync import get_google_service, list_google_calendars, load_outlook_snapshot, perform_sync
 
 
 class SyncSignals(QObject):
@@ -36,9 +35,14 @@ class SyncSettingsApp(QMainWindow):
         super().__init__()
         self.config_manager = ConfigManager()
         self.signals = SyncSignals()
+        self.is_quitting = False
+        self.has_shown_tray_hint = False
+        self.tray_icon = None
+        self.logo_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "PhilsSyncLogo.png")
         self.init_ui()
         self.load_settings()
-        
+        self.setup_system_tray()
+
         # Timer to refresh status
         self.status_timer = QTimer()
         self.status_timer.timeout.connect(self.refresh_status)
@@ -46,23 +50,36 @@ class SyncSettingsApp(QMainWindow):
     
     def init_ui(self):
         """Initialize the user interface."""
+        from PyQt5.QtGui import QIcon, QPixmap
         self.setWindowTitle("Outlook to Google Sync - Settings")
         self.setGeometry(100, 100, 900, 700)
-        
+
+        # Set window icon to logo
+        if os.path.exists(self.logo_path):
+            self.setWindowIcon(QIcon(self.logo_path))
+
         # Create central widget and main layout
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         main_layout = QVBoxLayout(central_widget)
-        
+
+        # Add logo at the top
+        if os.path.exists(self.logo_path):
+            logo_label = QLabel()
+            logo_pixmap = QPixmap(self.logo_path)
+            logo_label.setPixmap(logo_pixmap.scaledToHeight(100, Qt.SmoothTransformation))
+            logo_label.setAlignment(Qt.AlignCenter)
+            main_layout.addWidget(logo_label)
+
         # Create tab widget
         self.tabs = QTabWidget()
         main_layout.addWidget(self.tabs)
-        
+
         # Add tabs
         self.tabs.addTab(self.create_settings_tab(), "Settings")
         self.tabs.addTab(self.create_auth_tab(), "Google Authentication")
         self.tabs.addTab(self.create_history_tab(), "Sync History")
-        
+
         # Status bar
         self.statusBar = QStatusBar()
         self.setStatusBar(self.statusBar)
@@ -113,6 +130,10 @@ class SyncSettingsApp(QMainWindow):
         self.logging_level_combo = QComboBox()
         self.logging_level_combo.addItems(['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'])
         form_layout.addRow("Logging Level:", self.logging_level_combo)
+
+        # Selected target calendar (configured in auth tab)
+        self.selected_calendar_label = QLabel("Primary Calendar (primary)")
+        form_layout.addRow("Target Google Calendar:", self.selected_calendar_label)
         
         # Monitoring enabled
         monitoring_layout = QHBoxLayout()
@@ -124,11 +145,17 @@ class SyncSettingsApp(QMainWindow):
         
         layout.addLayout(form_layout)
         
-        # Save button
-        save_btn = QPushButton("Save Settings")
-        save_btn.clicked.connect(self.save_settings)
-        save_btn.setStyleSheet("background-color: #4CAF50; color: white; padding: 10px; font-weight: bold;")
-        layout.addWidget(save_btn)
+        # Remove Save button (autosave now)
+
+        close_note = QLabel("Tip: Minimize keeps the window in the taskbar. Close hides it to the system tray (monitoring continues). Use the tray icon to restore or quit.")
+        close_note.setWordWrap(True)
+        close_note.setStyleSheet("color: #555;")
+        layout.addWidget(close_note)
+        # Autosave connections for settings
+        self.outlook_path_input.textChanged.connect(lambda: self.autosave_setting('OUTLOOK_JSON_PATH', self.outlook_path_input.text()))
+        self.timezone_combo.currentTextChanged.connect(lambda tz: self.autosave_setting('TIMEZONE', tz))
+        self.sync_frequency_spin.valueChanged.connect(lambda val: self.autosave_setting('SYNC_FREQUENCY_MINUTES', val))
+        self.logging_level_combo.currentTextChanged.connect(lambda lvl: self.autosave_setting('LOGGING_LEVEL', lvl))
         
         layout.addStretch()
         return widget
@@ -152,6 +179,16 @@ class SyncSettingsApp(QMainWindow):
         self.auth_status_label = QLabel("Checking authentication...")
         status_layout.addWidget(self.auth_status_label)
         layout.addWidget(status_box)
+
+        calendar_box = QGroupBox("Calendar Selection")
+        calendar_layout = QFormLayout(calendar_box)
+        self.calendar_combo = QComboBox()
+        self.calendar_combo.currentIndexChanged.connect(self.on_calendar_selection_changed)
+        refresh_calendars_btn = QPushButton("Refresh Calendars")
+        refresh_calendars_btn.clicked.connect(self.populate_calendars)
+        calendar_layout.addRow("Sync Target Calendar:", self.calendar_combo)
+        calendar_layout.addRow("", refresh_calendars_btn)
+        layout.addWidget(calendar_box)
         
         # Action buttons
         button_layout = QHBoxLayout()
@@ -182,6 +219,7 @@ class SyncSettingsApp(QMainWindow):
         
         layout.addStretch()
         self.update_auth_status()
+        self.populate_calendars()
         return widget
     
     def create_history_tab(self) -> QWidget:
@@ -220,9 +258,23 @@ class SyncSettingsApp(QMainWindow):
         self.log_text.setMaximumHeight(300)
         log_layout.addWidget(self.log_text)
         
+        log_actions_layout = QHBoxLayout()
+
         refresh_log_btn = QPushButton("Refresh Log")
         refresh_log_btn.clicked.connect(self.refresh_log)
-        log_layout.addWidget(refresh_log_btn)
+        log_actions_layout.addWidget(refresh_log_btn)
+
+        clear_log_btn = QPushButton("Clear Log")
+        clear_log_btn.clicked.connect(self.clear_log)
+        log_actions_layout.addWidget(clear_log_btn)
+
+        sync_now_btn = QPushButton("Sync Now")
+        sync_now_btn.clicked.connect(self.sync_now)
+        sync_now_btn.setStyleSheet("background-color: #2e7d32; color: white; padding: 6px 10px; font-weight: bold;")
+        log_actions_layout.addWidget(sync_now_btn)
+
+        log_actions_layout.addStretch()
+        log_layout.addLayout(log_actions_layout)
         
         layout.addWidget(log_box)
         
@@ -236,19 +288,25 @@ class SyncSettingsApp(QMainWindow):
         self.timezone_combo.setCurrentText(self.config_manager.get_timezone())
         self.sync_frequency_spin.setValue(self.config_manager.get_sync_frequency_minutes())
         self.logging_level_combo.setCurrentText(self.config_manager.get_logging_level())
+        self.selected_calendar_label.setText(
+            f"{self.config_manager.get_google_calendar_name()} ({self.config_manager.get_google_calendar_id()})"
+        )
     
     def save_settings(self):
-        """Save settings from UI to config."""
+        """(Deprecated) Save settings from UI to config. No longer needed with autosave."""
+        pass
+
+    def autosave_setting(self, key, value):
+        """Autosave a single setting change."""
         try:
-            self.config_manager.update({
-                'OUTLOOK_JSON_PATH': self.outlook_path_input.text(),
-                'TIMEZONE': self.timezone_combo.currentText(),
-                'SYNC_FREQUENCY_MINUTES': self.sync_frequency_spin.value(),
-                'LOGGING_LEVEL': self.logging_level_combo.currentText(),
-            })
-            QMessageBox.information(self, "Success", "Settings saved successfully!")
+            self.config_manager.set(key, value)
+            # Update label if calendar name/id
+            if key in ("GOOGLE_CALENDAR_ID", "GOOGLE_CALENDAR_NAME"):
+                self.selected_calendar_label.setText(
+                    f"{self.config_manager.get_google_calendar_name()} ({self.config_manager.get_google_calendar_id()})"
+                )
         except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to save settings: {e}")
+            QMessageBox.critical(self, "Autosave Error", f"Failed to autosave {key}: {e}")
     
     def browse_outlook_file(self):
         """Open file browser for Outlook snapshot file."""
@@ -267,9 +325,10 @@ class SyncSettingsApp(QMainWindow):
             self.status_label.setText("Status: Authenticating with Google...")
             QApplication.processEvents()
             
-            service = get_google_service(self.config_manager.get_timezone())
+            get_google_service(self.config_manager.get_timezone())
             QMessageBox.information(self, "Success", "Successfully authenticated with Google Calendar!")
             self.update_auth_status()
+            self.populate_calendars()
             self.status_label.setText("Status: Ready")
             
         except Exception as e:
@@ -281,8 +340,12 @@ class SyncSettingsApp(QMainWindow):
         try:
             if os.path.exists('token.json'):
                 os.remove('token.json')
+                self.config_manager.set_google_calendar('primary', 'Primary Calendar')
+                self.calendar_combo.clear()
+                self.calendar_combo.addItem('Primary Calendar', 'primary')
                 QMessageBox.information(self, "Success", "Successfully logged out!")
                 self.update_auth_status()
+                self.selected_calendar_label.setText('Primary Calendar (primary)')
             else:
                 QMessageBox.information(self, "Info", "No active authentication found.")
         except Exception as e:
@@ -292,26 +355,73 @@ class SyncSettingsApp(QMainWindow):
         """Update the authentication status display."""
         if os.path.exists('token.json'):
             try:
-                with open('token.json', 'r') as f:
-                    token_data = json.load(f)
-                    email = token_data.get('email', 'Unknown')
-                self.auth_status_label.setText(
-                    f"✓ Authenticated as: {email}"
-                )
+                service = get_google_service(self.config_manager.get_timezone())
+                calendars = list_google_calendars(service)
+                primary = next((c for c in calendars if c.get('primary')), None)
+                account_hint = primary['id'] if primary else self.config_manager.get_google_calendar_id()
+                self.auth_status_label.setText(f"Authenticated {account_hint}")
                 self.auth_status_label.setStyleSheet("color: green; font-weight: bold;")
-            except:
-                self.auth_status_label.setText("✗ Token file corrupted")
-                self.auth_status_label.setStyleSheet("color: red; font-weight: bold;")
+            except Exception:
+                self.auth_status_label.setText("Authenticated (token present). Unable to resolve account hint.")
+                self.auth_status_label.setStyleSheet("color: #b36b00; font-weight: bold;")
         else:
-            self.auth_status_label.setText("✗ Not authenticated")
+            self.auth_status_label.setText("Not authenticated")
             self.auth_status_label.setStyleSheet("color: red; font-weight: bold;")
+
+    def populate_calendars(self):
+        """Load available Google calendars and populate selector."""
+        self.calendar_combo.clear()
+        if not os.path.exists('token.json'):
+            self.calendar_combo.addItem('Authenticate to load calendars', '')
+            return
+
+        try:
+            service = get_google_service(self.config_manager.get_timezone())
+            calendars = list_google_calendars(service)
+            if not calendars:
+                self.calendar_combo.addItem('No calendars found', '')
+                return
+
+            # Primary calendars first, then by summary.
+            calendars.sort(key=lambda c: (not c.get('primary', False), c.get('summary', '').lower()))
+            for cal in calendars:
+                label = cal['summary']
+                if cal.get('primary'):
+                    label = f"{label} [Primary]"
+                self.calendar_combo.addItem(label, cal['id'])
+
+            saved_id = self.config_manager.get_google_calendar_id()
+            idx = self.calendar_combo.findData(saved_id)
+            if idx >= 0:
+                self.calendar_combo.setCurrentIndex(idx)
+            else:
+                self.calendar_combo.setCurrentIndex(0)
+                self.on_calendar_selection_changed(0)
+        except Exception as e:
+            self.calendar_combo.clear()
+            self.calendar_combo.addItem(f"Failed to load calendars: {e}", '')
+
+    def on_calendar_selection_changed(self, index: int):
+        """Persist selected calendar and update display label (autosave)."""
+        calendar_id = self.calendar_combo.itemData(index)
+        calendar_name = self.calendar_combo.itemText(index)
+        if not calendar_id:
+            return
+        self.autosave_setting('GOOGLE_CALENDAR_ID', calendar_id)
+        self.autosave_setting('GOOGLE_CALENDAR_NAME', calendar_name)
+        self.selected_calendar_label.setText(f"{calendar_name} ({calendar_id})")
     
     def refresh_history(self):
         """Refresh the sync history display."""
         last_sync = self.config_manager.get_last_sync_info()
         
         if last_sync['time']:
-            self.last_sync_time_label.setText(last_sync['time'])
+            try:
+                parsed = datetime.fromisoformat(str(last_sync['time']))
+                self.last_sync_time_label.setText(parsed.strftime('%Y-%m-%d %H:%M:%S'))
+            except ValueError:
+                # Backward-compatible fallback for older timestamp formats.
+                self.last_sync_time_label.setText(str(last_sync['time']).split('.')[0])
         else:
             self.last_sync_time_label.setText("Never")
         
@@ -351,11 +461,117 @@ class SyncSettingsApp(QMainWindow):
                 self.log_text.setText("No log file found yet.")
         except Exception as e:
             self.log_text.setText(f"Error reading log: {e}")
+
+    def clear_log(self):
+        """Clear all entries from the sync log file and viewer."""
+        try:
+            with open('sync.log', 'w', encoding='utf-8'):
+                pass
+            self.log_text.clear()
+            self.status_label.setText("Status: Log cleared")
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to clear log: {e}")
+
+    def sync_now(self):
+        """Run a sync immediately from the UI."""
+        try:
+            outlook_json_path = self.config_manager.get_outlook_json_path()
+            if not outlook_json_path:
+                QMessageBox.warning(self, "Missing Configuration", "Please select an Outlook snapshot file first.")
+                return
+            if not os.path.exists(outlook_json_path):
+                QMessageBox.warning(self, "File Not Found", f"Cannot find snapshot file:\n{outlook_json_path}")
+                return
+
+            timezone = self.config_manager.get_timezone()
+            calendar_id = self.config_manager.get_google_calendar_id()
+
+            self.status_label.setText("Status: Syncing now...")
+            QApplication.processEvents()
+
+            service = get_google_service(timezone)
+            outlook_events = load_outlook_snapshot(outlook_json_path)
+            stats = perform_sync(service, outlook_events, timezone, calendar_id)
+
+            self.config_manager.update_sync_result(
+                'Success',
+                stats.get('created', 0),
+                stats.get('updated', 0),
+                stats.get('deleted', 0),
+            )
+
+            self.status_label.setText(
+                f"Status: Sync complete (C:{stats.get('created', 0)} U:{stats.get('updated', 0)} D:{stats.get('deleted', 0)})"
+            )
+            self.refresh_history()
+        except Exception as e:
+            self.config_manager.update_sync_result(f'Error: {str(e)}')
+            self.status_label.setText("Status: Sync failed")
+            self.refresh_history()
+            QMessageBox.critical(self, "Sync Error", f"Sync failed: {e}")
     
     def refresh_status(self):
         """Periodically refresh status information."""
-        self.update_auth_status()
         self.refresh_history()
+
+    def setup_system_tray(self):
+        """Create system tray icon and actions for close-to-tray behavior."""
+        from PyQt5.QtGui import QIcon
+        if not QSystemTrayIcon.isSystemTrayAvailable():
+            return
+
+        tray_menu = QMenu(self)
+        show_action = QAction("Open Settings", self)
+        quit_action = QAction("Quit", self)
+        show_action.triggered.connect(self.restore_from_tray)
+        quit_action.triggered.connect(self.quit_from_tray)
+        tray_menu.addAction(show_action)
+        tray_menu.addAction(quit_action)
+
+        self.tray_icon = QSystemTrayIcon(self)
+        # Use logo as tray icon if available
+        if os.path.exists(self.logo_path):
+            self.tray_icon.setIcon(QIcon(self.logo_path))
+        else:
+            self.tray_icon.setIcon(self.style().standardIcon(QStyle.SP_ComputerIcon))
+        self.tray_icon.setToolTip("Outlook to Google Sync")
+        self.tray_icon.setContextMenu(tray_menu)
+        self.tray_icon.activated.connect(self.on_tray_activated)
+        self.tray_icon.show()
+
+    def on_tray_activated(self, reason):
+        """Restore the window on tray icon activation."""
+        if reason == QSystemTrayIcon.Trigger:
+            self.restore_from_tray()
+
+    def restore_from_tray(self):
+        """Restore and focus the settings window."""
+        self.showNormal()
+        self.activateWindow()
+        self.raise_()
+
+    def quit_from_tray(self):
+        """Quit the application from tray menu."""
+        self.is_quitting = True
+        if self.tray_icon:
+            self.tray_icon.hide()
+        QApplication.instance().quit()
+
+    def closeEvent(self, event):
+        """Minimize to tray on close so monitoring can continue."""
+        if self.tray_icon and self.tray_icon.isVisible() and not self.is_quitting:
+            event.ignore()
+            self.hide()
+            if not self.has_shown_tray_hint:
+                self.tray_icon.showMessage(
+                    "Outlook to Google Sync",
+                    "App minimized to tray. Use tray icon to reopen or quit.",
+                    QSystemTrayIcon.Information,
+                    4000,
+                )
+                self.has_shown_tray_hint = True
+        else:
+            event.accept()
 
 
 def main():
