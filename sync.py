@@ -59,7 +59,10 @@ def normalize_event_datetime(raw_value: str, timezone_name: str) -> str:
     dt = datetime.datetime.fromisoformat(normalized_text)
 
     if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=target_tz)
+        # Power Automate often emits UTC clock time without an offset suffix.
+        # Treat naive values as UTC, then convert into configured local timezone.
+        dt = dt.replace(tzinfo=datetime.timezone.utc)
+        dt = dt.astimezone(target_tz)
     else:
         dt = dt.astimezone(target_tz)
 
@@ -84,10 +87,13 @@ def build_event_description(event: Dict) -> str:
             parts.append(f"Categories: {categories_text}")
 
     content_value = (
-        event.get("details")
+        event.get("description")
+        or event.get("details")
         or event.get("bodyPreview")
         or event.get("body")
         or event.get("content")
+        or event.get("Description")
+        or event.get("Details")
         or event.get("BodyPreview")
         or event.get("Body")
         or event.get("Content")

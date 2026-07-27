@@ -41,51 +41,63 @@ class TaskSchedulerManager:
         try:
             python_exe = cls.get_python_executable()
             script_path = cls.get_script_path()
+            script_dir = os.path.dirname(script_path)
             
             if not os.path.exists(script_path):
                 print(f"Error: Script not found at {script_path}")
                 return False
             
-            # Build the command
-            command = f'"{python_exe}" "{script_path}" --monitor'
-            
-            # Create the task using schtasks command
+            # Build command argument used by scheduled task action.
+            action_args = f'"{script_path}" --monitor'
+
+            # Use PowerShell ScheduledTasks API so we can configure:
+            # - single instance policy
+            # - startup delay
+            # - restart-on-failure
             if run_at_startup:
-                # Run at user logon
-                cmd = [
-                    'schtasks', '/create',
-                    '/tn', cls.TASK_NAME,
-                    '/tr', command,
-                    '/sc', 'onlogon',
-                    '/rl', 'highest',
-                    '/f',
-                    '/it'  # Run only if user is logged in
-                ]
-                trigger_desc = "At user logon"
+                trigger_block = "$trigger = New-ScheduledTaskTrigger -AtLogOn -Delay (New-TimeSpan -Minutes 1)"
+                trigger_desc = "At user logon (1 minute delay)"
             else:
-                # Run every 15 minutes
-                cmd = [
-                    'schtasks', '/create',
-                    '/tn', cls.TASK_NAME,
-                    '/tr', command,
-                    '/sc', 'minute',
-                    '/mo', '15',
-                    '/rl', 'highest',
-                    '/f'
-                ]
-                trigger_desc = "Every 15 minutes"
+                trigger_block = (
+                    "$start = (Get-Date).AddMinutes(1)\n"
+                    "$trigger = New-ScheduledTaskTrigger -Once -At $start "
+                    "-RepetitionInterval (New-TimeSpan -Minutes 15) "
+                    "-RepetitionDuration (New-TimeSpan -Days 3650)"
+                )
+                trigger_desc = "Every 15 minutes (starts after 1 minute)"
+
+            ps_script = f"""
+$taskName = '{cls.TASK_NAME}'
+$taskDescription = '{cls.TASK_DESCRIPTION}'
+$action = New-ScheduledTaskAction -Execute '{python_exe}' -Argument '{action_args}' -WorkingDirectory '{script_dir}'
+{trigger_block}
+$settings = New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 5) -StartWhenAvailable
+$principal = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\\$env:USERNAME" -LogonType Interactive -RunLevel Highest
+Register-ScheduledTask -TaskName $taskName -Description $taskDescription -Action $action -Trigger $trigger -Settings $settings -Principal $principal -Force | Out-Null
+"""
             
             print(f"Creating Task Scheduler task: {cls.TASK_NAME}")
             print(f"Trigger: {trigger_desc}")
-            print(f"Command: {command}")
-            
+            print(f"Command: \"{python_exe}\" {action_args}")
+            print("Policy: Single instance (ignore new), retry up to 3 times every 5 minutes")
+
+            cmd = [
+                'powershell',
+                '-NoProfile',
+                '-NonInteractive',
+                '-Command',
+                ps_script,
+            ]
             result = subprocess.run(cmd, capture_output=True, text=True)
             
             if result.returncode == 0:
                 print("✓ Task created successfully")
                 return True
             else:
-                print(f"✗ Failed to create task: {result.stderr}")
+                error_text = result.stderr.strip() or result.stdout.strip()
+                print(f"✗ Failed to create task: {error_text}")
+                if 'access is denied' in error_text.lower() or '0x80070005' in error_text.lower():
+                    print("Tip: Re-run this command from an elevated Administrator terminal.")
                 return False
         
         except Exception as e:
@@ -110,7 +122,10 @@ class TaskSchedulerManager:
                 print("✓ Task deleted successfully")
                 return True
             else:
-                print(f"✗ Failed to delete task: {result.stderr}")
+                error_text = result.stderr.strip() or result.stdout.strip()
+                print(f"✗ Failed to delete task: {error_text}")
+                if 'access is denied' in error_text.lower() or '0x80070005' in error_text.lower():
+                    print("Tip: Re-run this command from an elevated Administrator terminal.")
                 return False
         
         except Exception as e:
@@ -138,16 +153,6 @@ class TaskSchedulerManager:
             return None
         except:
             return None
-
-
-def check_admin():
-    """Check if running with administrator privileges."""
-    try:
-        # On Windows, check if running with admin privileges
-        import ctypes
-        return ctypes.windll.shell.IsUserAnAdmin()
-    except:
-        return False
 
 
 def main():
@@ -180,12 +185,6 @@ def main():
     )
     
     args = parser.parse_args()
-    
-    # Check for admin privileges
-    if not check_admin():
-        print("Error: This script requires administrator privileges.")
-        print("Please run as Administrator (right-click cmd.exe > Run as administrator)")
-        sys.exit(1)
     
     if args.install:
         run_at_startup = args.frequency == 'startup'
