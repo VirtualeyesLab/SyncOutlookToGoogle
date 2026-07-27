@@ -1,27 +1,26 @@
 # Outlook to Google Calendar Sync
 
-A stateless Python utility that performs a one-way sync from a corporate Exchange/Outlook calendar to a personal Google Calendar. It uses Power Automate to create a local snapshot of your Exchange calendar, which is then parsed and synced via the Google Calendar API.
+A Python utility that performs a one-way sync from a corporate Exchange/Outlook calendar to a personal Google Calendar. It uses Power Automate to create one local JSON file per event change, which is then synced via the Google Calendar API.
 
 ---
 
 # Setup
 
 ### 1. Power Automate
-Create a flow that writes upcoming events to `OutlookSnapshot.json` in OneDrive.
+Create a flow that writes one JSON file per event change to a folder in OneDrive.
 
 - **Trigger:** `When an event is added, updated or deleted (V3)`
-- **Get events:**  
-  - Start: `utcNow()`  
-  - End: `addDays(utcNow(), 360)`
-- **Select:** map fields to dynamic Outlook:
-  - `ExchangeID` → Id  
-  - `Subject` → Subject  
-  - `StartTime` → Start time  
-  - `EndTime` → End time  
-  - `Location` → Location  
-  - `IsAllDay` → Is all day event  
-  - `Categories` → Categories  
-- **Create file:** write `body('Select')` to `OutlookSnapshot.json` (overwrite)
+- **Create file:** filename should be unique per event (for example using event id).  
+- **JSON content schema:**
+  - `actionType` (`created`, `updated`, or `deleted`)  
+  - `eventId`  
+  - `subject`  
+  - `start`  
+  - `end`  
+  - `location`  
+  - `isAllDay`
+
+Processed files are deleted only after successful sync. Failed files remain in the folder for retry.
 
 ---
 
@@ -43,7 +42,7 @@ Create a flow that writes upcoming events to `OutlookSnapshot.json` in OneDrive.
 ### GUI (recommended)
     python gui_app.py
 
-- Select `OutlookSnapshot.json`  
+- Select the Outlook event folder  
 - Configure settings  
 - Authenticate with Google  
 
@@ -52,6 +51,15 @@ Create a flow that writes upcoming events to `OutlookSnapshot.json` in OneDrive.
 
 ### One-off sync
     python sync.py
+
+### Purge previously synced Google events
+Use this when you need to remove events created by this tool (for example after a timezone mapping fix) before a clean re-sync.
+
+Preview only (no deletion):
+    python agent.py --purge-synced --purge-dry-run
+
+Delete tagged future events:
+    python agent.py --purge-synced
 
 ---
 
@@ -82,10 +90,10 @@ python setup_scheduler.py --status
 
 ## File Monitoring
 
-The agent uses two methods to detect changes to `OutlookSnapshot.json`:
+The agent uses two methods to detect changes in the event folder:
 
 1. **Watchdog (Preferred):** Real-time file system notifications (efficient and responsive)
-2. **Polling (Fallback):** Checks file modification time periodically (if watchdog unavailable)
+2. **Polling (Fallback):** Checks for new/changed `.json` files periodically (if watchdog unavailable)
 
 The agent automatically selects the best available method and switches between them if needed.
 
@@ -95,8 +103,8 @@ The agent automatically selects the best available method and switches between t
 
 ### "Snapshot file not found"
 - Verify the path in config.json is correct
-- Ensure your Power Automate flow is running and updating `OutlookSnapshot.json`
-- Check that the file exists at the configured location
+- Ensure your Power Automate flow is running and writing event JSON files
+- Check that the folder exists at the configured location
 
 ### Authentication errors
 - Delete `token.json` and re-authenticate through the GUI
@@ -104,7 +112,7 @@ The agent automatically selects the best available method and switches between t
 
 ### No events being synced
 - Check `sync.log` for detailed error messages
-- Verify your Outlook events exist in the snapshot file
+- Verify event JSON files are present in the configured folder
 - Ensure the configured timezone matches your local timezone
 
 ### GUI won't start

@@ -3,6 +3,8 @@ import json
 import os
 import sys
 import logging
+import re
+from pathlib import Path
 from zoneinfo import ZoneInfo
 from typing import Dict, List, Tuple, Optional
 from google.oauth2.credentials import Credentials
@@ -28,6 +30,301 @@ logging.getLogger("googleapiclient.discovery_cache").setLevel(logging.WARNING)
 SCOPES = ['https://www.googleapis.com/auth/calendar']
 CONFIG_FILE = 'config.json'
 
+
+def _trim_fractional_seconds(iso_value: str) -> str:
+    """Trim fractional seconds to microseconds (max 6 digits) for robust parsing."""
+    match = re.match(r"^(.*?\.)(\d+)(Z|[+-]\d\d:\d\d)?$", iso_value)
+    if not match:
+        return iso_value
+
+    prefix, frac, suffix = match.groups()
+    trimmed_frac = frac[:6]
+    return f"{prefix}{trimmed_frac}{suffix or ''}"
+
+
+def normalize_event_datetime(raw_value: str, timezone_name: str) -> str:
+    """
+    Normalize input datetime text into local wall time for the configured timezone.
+    Returns RFC3339-like local datetime without offset (Google receives timezone separately).
+    """
+    value = str(raw_value or "").strip()
+    if not value:
+        return value
+
+    normalized_text = _trim_fractional_seconds(value)
+    if normalized_text.endswith('Z'):
+        normalized_text = normalized_text[:-1] + '+00:00'
+
+    target_tz = resolve_timezone(timezone_name)
+    dt = datetime.datetime.fromisoformat(normalized_text)
+
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=target_tz)
+    else:
+        dt = dt.astimezone(target_tz)
+
+    return dt.strftime('%Y-%m-%dT%H:%M:%S')
+
+def load_event_file(file_path: str) -> dict:
+    with open(file_path, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def build_event_description(event: Dict) -> str:
+    """Build a Google event description from common Outlook/Power Automate fields."""
+    parts: List[str] = []
+
+    categories = event.get("categories") or event.get("Categories")
+    if categories:
+        if isinstance(categories, list):
+            categories_text = ", ".join(str(item).strip() for item in categories if str(item).strip())
+        else:
+            categories_text = str(categories).strip()
+        if categories_text:
+            parts.append(f"Categories: {categories_text}")
+
+    content_value = (
+        event.get("details")
+        or event.get("bodyPreview")
+        or event.get("body")
+        or event.get("content")
+        or event.get("BodyPreview")
+        or event.get("Body")
+        or event.get("Content")
+    )
+
+    if isinstance(content_value, dict):
+        content_value = (
+            content_value.get("content")
+            or content_value.get("Content")
+            or content_value.get("body")
+            or content_value.get("Body")
+        )
+
+    if content_value:
+        content_text = str(content_value).strip()
+        if content_text:
+            parts.append(content_text)
+
+    return "\n\n".join(parts)
+
+def sync_single_event(service, event: dict,
+                      timezone='Pacific/Auckland',
+                      calendar_id='primary'):
+
+    outlook_id = event["eventId"]
+    action = event["actionType"]
+    subject = str(event.get("subject", "")).strip()
+    start_raw = str(event.get("start", "")).strip()
+    end_raw = str(event.get("end", "")).strip()
+    start_synced = start_raw
+    end_synced = end_raw
+
+    # Find existing Google event by current key first, then legacy key.
+    result = service.events().list(
+        calendarId=calendar_id,
+        privateExtendedProperty=f"ExchangeID={outlook_id}",
+        maxResults=1
+    ).execute()
+
+    matches = result.get("items", [])
+    google_event = matches[0] if matches else None
+
+    if not google_event:
+        legacy_result = service.events().list(
+            calendarId=calendar_id,
+            privateExtendedProperty=f"OutlookID={outlook_id}",
+            maxResults=1
+        ).execute()
+        legacy_matches = legacy_result.get("items", [])
+        google_event = legacy_matches[0] if legacy_matches else None
+
+    # DELETE
+    if action == "deleted":
+
+        google_event_id = None
+        if google_event:
+            google_event_id = google_event.get("id")
+            service.events().delete(
+                calendarId=calendar_id,
+                eventId=google_event["id"]
+            ).execute()
+
+        return {
+            "google_action": "deleted",
+            "google_result": "deleted" if google_event else "not_found",
+            "outlook_action": action,
+            "subject": subject,
+            "start_raw": start_raw,
+            "end_raw": end_raw,
+            "start_synced": start_synced,
+            "end_synced": end_synced,
+            "outlook_event_id": outlook_id,
+            "google_event_id": google_event_id,
+        }
+
+    # CREATE / UPDATE
+
+    body = {
+        "summary": event.get("subject", ""),
+        "location": event.get("location", ""),
+        "extendedProperties": {
+            "private": {
+                "ExchangeID": outlook_id,
+                "OutlookID": outlook_id,
+                "Source": "Outlook"
+            }
+        }
+    }
+
+    description = build_event_description(event)
+    if description:
+        body["description"] = description
+
+    if str(event.get("isAllDay")).lower() == "true":
+
+        body["start"] = {
+            "date": event["start"][:10]
+        }
+
+        body["end"] = {
+            "date": event["end"][:10]
+        }
+
+    else:
+        start_synced = normalize_event_datetime(event.get("start", ""), timezone)
+        end_synced = normalize_event_datetime(event.get("end", ""), timezone)
+
+        body["start"] = {
+            "dateTime": start_synced,
+            "timeZone": timezone
+        }
+
+        body["end"] = {
+            "dateTime": end_synced,
+            "timeZone": timezone
+        }
+
+    if google_event:
+
+        service.events().update(
+            calendarId=calendar_id,
+            eventId=google_event["id"],
+            body=body
+        ).execute()
+
+        return {
+            "google_action": "updated",
+            "outlook_action": action,
+            "subject": subject,
+            "start_raw": start_raw,
+            "end_raw": end_raw,
+            "start_synced": start_synced,
+            "end_synced": end_synced,
+            "outlook_event_id": outlook_id,
+            "google_event_id": google_event.get("id"),
+        }
+
+    else:
+
+        created_event = service.events().insert(
+            calendarId=calendar_id,
+            body=body
+        ).execute()
+
+        return {
+            "google_action": "created",
+            "outlook_action": action,
+            "subject": subject,
+            "start_raw": start_raw,
+            "end_raw": end_raw,
+            "start_synced": start_synced,
+            "end_synced": end_synced,
+            "outlook_event_id": outlook_id,
+            "google_event_id": created_event.get("id"),
+        }
+
+
+def process_event_folder(
+    service,
+    folder_path: str,
+    timezone: str = 'Pacific/Auckland',
+    calendar_id: str = 'primary',
+    delete_on_success: bool = True,
+    recursive: bool = True,
+    max_passes: int = 5,
+) -> Dict[str, int]:
+    """Process one JSON file per event from a folder and optionally delete successful files."""
+    stats = {
+        'created': 0,
+        'updated': 0,
+        'deleted': 0,
+        'failed': 0,
+        'processed': 0,
+    }
+
+    folder = Path(folder_path)
+
+    def get_pending_files() -> List[Path]:
+        iterator = folder.rglob('*.json') if recursive else folder.glob('*.json')
+        return sorted(path for path in iterator if path.is_file())
+
+    for pass_index in range(1, max_passes + 1):
+        pending_files = get_pending_files()
+        if not pending_files:
+            if pass_index == 1:
+                logging.info(f"No JSON event files found in {folder_path}")
+            break
+
+        logging.info(f"Processing pass {pass_index} with {len(pending_files)} JSON file(s) in {folder_path}")
+
+        processed_this_pass = 0
+        for json_file in pending_files:
+            try:
+                event = load_event_file(str(json_file))
+                result = sync_single_event(service, event, timezone, calendar_id)
+                google_action = result.get('google_action', 'unknown')
+
+                if google_action in stats:
+                    stats[google_action] += 1
+                stats['processed'] += 1
+                processed_this_pass += 1
+
+                logging.info(
+                    "Processed %s | outlook_action=%s | google_action=%s | google_result=%s | subject=%r | "
+                    "start_raw=%s | end_raw=%s | start_synced=%s | end_synced=%s | "
+                    "outlook_event_id=%s | google_event_id=%s",
+                    json_file.name,
+                    result.get('outlook_action', ''),
+                    google_action,
+                    result.get('google_result', ''),
+                    result.get('subject', ''),
+                    result.get('start_raw', ''),
+                    result.get('end_raw', ''),
+                    result.get('start_synced', ''),
+                    result.get('end_synced', ''),
+                    result.get('outlook_event_id', ''),
+                    result.get('google_event_id', ''),
+                )
+
+                if delete_on_success:
+                    json_file.unlink()
+                    logging.info(f"Deleted {json_file.name} after successful sync")
+
+            except Exception as ex:
+                stats['failed'] += 1
+                logging.error(f"Failed processing {json_file.name}: {ex}")
+
+        if processed_this_pass == 0:
+            break
+
+        remaining_files = get_pending_files()
+        if not remaining_files:
+            break
+
+        logging.info(f"{len(remaining_files)} JSON file(s) remain after pass {pass_index}; running another pass")
+
+    return stats
 
 def resolve_timezone(timezone_name: str):
     """Resolve timezone safely across environments (Windows may lack tzdata)."""
@@ -108,6 +405,98 @@ def list_google_calendars(service) -> List[Dict[str, str]]:
             break
 
     return calendars
+
+
+def list_tagged_google_events(
+    service,
+    calendar_id: str = 'primary',
+    time_min: Optional[str] = None,
+    time_max: Optional[str] = None,
+) -> List[Dict]:
+    """
+    Return Google events tagged as synced by this tool.
+    Tagged events contain at least one of:
+    - extendedProperties.private.ExchangeID
+    - extendedProperties.private.OutlookID
+    - extendedProperties.private.Source == 'Outlook'
+    """
+    events = []
+    page_token = None
+
+    while True:
+        query = {
+            'calendarId': calendar_id,
+            'singleEvents': True,
+            'showDeleted': False,
+            'maxResults': 2500,
+            'pageToken': page_token,
+        }
+        if time_min:
+            query['timeMin'] = time_min
+        if time_max:
+            query['timeMax'] = time_max
+
+        result = service.events().list(**query).execute()
+        for item in result.get('items', []):
+            props = item.get('extendedProperties', {}).get('private', {})
+            if props.get('ExchangeID') or props.get('OutlookID') or props.get('Source') == 'Outlook':
+                events.append(item)
+
+        page_token = result.get('nextPageToken')
+        if not page_token:
+            break
+
+    return events
+
+
+def purge_synced_events(
+    service,
+    calendar_id: str = 'primary',
+    time_min: Optional[str] = None,
+    time_max: Optional[str] = None,
+    dry_run: bool = False,
+) -> Dict[str, int]:
+    """Delete Google events that were tagged as synced by this tool."""
+    tagged_events = list_tagged_google_events(
+        service,
+        calendar_id=calendar_id,
+        time_min=time_min,
+        time_max=time_max,
+    )
+
+    deleted = 0
+    for event in tagged_events:
+        event_id = event.get('id')
+        if not event_id:
+            continue
+
+        summary = event.get('summary', '')
+        start_obj = event.get('start', {})
+        start_value = start_obj.get('dateTime') or start_obj.get('date') or ''
+
+        if dry_run:
+            logging.info(
+                "DRY RUN purge candidate | event_id=%s | summary=%r | start=%s",
+                event_id,
+                summary,
+                start_value,
+            )
+            continue
+
+        service.events().delete(calendarId=calendar_id, eventId=event_id).execute()
+        deleted += 1
+        logging.info(
+            "Purged synced event | event_id=%s | summary=%r | start=%s",
+            event_id,
+            summary,
+            start_value,
+        )
+
+    return {
+        'matched': len(tagged_events),
+        'deleted': deleted,
+        'dry_run': 1 if dry_run else 0,
+    }
 
 
 def perform_sync(service, outlook_events: List[Dict], timezone: str = 'Pacific/Auckland', calendar_id: str = 'primary') -> Dict[str, int]:

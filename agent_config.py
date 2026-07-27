@@ -99,11 +99,11 @@ class ConfigManager:
         })
     
     def get_outlook_json_path(self) -> str:
-        """Get the configured Outlook JSON snapshot path."""
+        """Get the configured Outlook event JSON folder path."""
         return self.get('OUTLOOK_JSON_PATH', '')
     
     def set_outlook_json_path(self, path: str):
-        """Set the Outlook JSON snapshot path."""
+        """Set the Outlook event JSON folder path."""
         self.set('OUTLOOK_JSON_PATH', path)
     
     def get_timezone(self) -> str:

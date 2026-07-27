@@ -19,7 +19,7 @@ from PyQt5.QtCore import Qt, QTimer, pyqtSignal, QObject
 from PyQt5.QtGui import QFont
 
 from agent_config import ConfigManager
-from sync import get_google_service, list_google_calendars, load_outlook_snapshot, perform_sync
+from sync import get_google_service, list_google_calendars, process_event_folder
 
 
 class SyncSignals(QObject):
@@ -94,15 +94,15 @@ class SyncSettingsApp(QMainWindow):
         # Create form layout for settings
         form_layout = QFormLayout()
         
-        # Outlook snapshot file path
+        # Outlook event folder path
         path_layout = QHBoxLayout()
         self.outlook_path_input = QLineEdit()
         self.outlook_path_input.setReadOnly(True)
         browse_btn = QPushButton("Browse...")
-        browse_btn.clicked.connect(self.browse_outlook_file)
+        browse_btn.clicked.connect(self.browse_outlook_folder)
         path_layout.addWidget(self.outlook_path_input)
         path_layout.addWidget(browse_btn)
-        form_layout.addRow("Outlook Snapshot File:", path_layout)
+        form_layout.addRow("Outlook Event Folder:", path_layout)
         
         # Timezone
         self.timezone_combo = QComboBox()
@@ -308,16 +308,15 @@ class SyncSettingsApp(QMainWindow):
         except Exception as e:
             QMessageBox.critical(self, "Autosave Error", f"Failed to autosave {key}: {e}")
     
-    def browse_outlook_file(self):
-        """Open file browser for Outlook snapshot file."""
-        file_path, _ = QFileDialog.getOpenFileName(
+    def browse_outlook_folder(self):
+        """Open folder browser for Outlook event JSON files."""
+        folder_path = QFileDialog.getExistingDirectory(
             self,
-            "Select Outlook Snapshot JSON",
-            "",
-            "JSON Files (*.json);;All Files (*)"
+            "Select Outlook Event Folder",
+            ""
         )
-        if file_path:
-            self.outlook_path_input.setText(file_path)
+        if folder_path:
+            self.outlook_path_input.setText(folder_path)
     
     def authenticate_google(self):
         """Authenticate with Google Calendar."""
@@ -475,12 +474,15 @@ class SyncSettingsApp(QMainWindow):
     def sync_now(self):
         """Run a sync immediately from the UI."""
         try:
-            outlook_json_path = self.config_manager.get_outlook_json_path()
-            if not outlook_json_path:
-                QMessageBox.warning(self, "Missing Configuration", "Please select an Outlook snapshot file first.")
+            event_folder = self.config_manager.get_outlook_json_path()
+            if not event_folder:
+                QMessageBox.warning(self, "Missing Configuration", "Please select an Outlook event folder first.")
                 return
-            if not os.path.exists(outlook_json_path):
-                QMessageBox.warning(self, "File Not Found", f"Cannot find snapshot file:\n{outlook_json_path}")
+            if not os.path.exists(event_folder):
+                QMessageBox.warning(self, "Folder Not Found", f"Cannot find event folder:\n{event_folder}")
+                return
+            if not os.path.isdir(event_folder):
+                QMessageBox.warning(self, "Invalid Path", f"Configured path is not a folder:\n{event_folder}")
                 return
 
             timezone = self.config_manager.get_timezone()
@@ -490,8 +492,13 @@ class SyncSettingsApp(QMainWindow):
             QApplication.processEvents()
 
             service = get_google_service(timezone)
-            outlook_events = load_outlook_snapshot(outlook_json_path)
-            stats = perform_sync(service, outlook_events, timezone, calendar_id)
+            stats = process_event_folder(
+                service,
+                event_folder,
+                timezone=timezone,
+                calendar_id=calendar_id,
+                delete_on_success=True,
+            )
 
             self.config_manager.update_sync_result(
                 'Success',
@@ -501,7 +508,7 @@ class SyncSettingsApp(QMainWindow):
             )
 
             self.status_label.setText(
-                f"Status: Sync complete (C:{stats.get('created', 0)} U:{stats.get('updated', 0)} D:{stats.get('deleted', 0)})"
+                f"Status: Sync complete (P:{stats.get('processed', 0)} C:{stats.get('created', 0)} U:{stats.get('updated', 0)} D:{stats.get('deleted', 0)} F:{stats.get('failed', 0)})"
             )
             self.refresh_history()
         except Exception as e:
